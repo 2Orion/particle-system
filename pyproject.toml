@@ -1,0 +1,11 @@
+[project]
+name = "particle-system"
+version = "0.1.0"
+description = "计算机动画课程作业：3D 实时粒子系统"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
