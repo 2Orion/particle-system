@@ -20,7 +20,7 @@ class ParticlePool:
     __slots__ = (
         "capacity", "count",
         "pos", "prev_pos", "vel", "acc", "aux",
-        "mass", "life", "max_life", "size", "color",
+        "mass", "life", "max_life", "size", "size0", "color",
     )
 
     def __init__(self, capacity: int) -> None:
@@ -37,7 +37,8 @@ class ParticlePool:
         self.mass = np.ones(n)               # 质量
         self.life = np.zeros(n)              # 剩余生命周期（秒），<=0 死亡
         self.max_life = np.ones(n)           # 初始生命周期（用于生命分数）
-        self.size = np.ones(n)               # 绘制尺寸
+        self.size = np.ones(n)               # 绘制尺寸（场景可逐帧改写）
+        self.size0 = np.ones(n)              # 出生尺寸（逐帧缩放时作基准）
         self.color = np.zeros((n, 4))        # RGBA
 
     def spawn(self, n: int) -> tuple[int, int]:

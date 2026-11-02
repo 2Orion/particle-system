@@ -132,3 +132,18 @@ class ParticleRenderer:
         self._vertexarray.render(moderngl.POINTS, vertices=n)
         self.ctx.disable(moderngl.BLEND)
         self.ctx.disable(moderngl.PROGRAM_POINT_SIZE)
+
+    def release(self) -> None:
+        """释放 GPU 资源（切场景重建渲染器前调用）。"""
+        if self.texture is not None:
+            self.texture.release()
+            self.texture = None
+        if self._vertexarray is not None:
+            self._vertexarray.release()
+            self._vertexarray = None
+        if self._buffer is not None:
+            self._buffer.release()
+            self._buffer = None
+        if self.prog is not None:
+            self.prog.release()
+            self.prog = None

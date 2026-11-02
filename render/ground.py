@@ -40,6 +40,7 @@ class GridRenderer:
     def __init__(self, ctx: moderngl.Context, extent: float = 30.0,
                  grid_step: float = 1.0, axis_len: float = 2.0) -> None:
         self.ctx = ctx
+        self.extent = float(extent)      # main.py 切场景时据此判断是否需重建
         self.prog = ctx.program(vertex_shader=_VERTEX, fragment_shader=_FRAGMENT)
         verts, colors = self._build(extent, grid_step, axis_len)
         self._vbo = ctx.buffer(np.hstack([verts, colors]).astype("f4").tobytes())

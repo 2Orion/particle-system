@@ -102,6 +102,7 @@ class PointEmitter(Emitter):
         pool.max_life[start:end] = pool.life[start:end]
         pool.size[start:end] = self.size_mean + \
             self.size_var * np.random.uniform(-1, 1, m)
+        pool.size0[start:end] = pool.size[start:end]
         pool.color[start:end] = self.color
 
 
@@ -136,6 +137,7 @@ class VolumeEmitter(Emitter):
         pool.max_life[start:end] = pool.life[start:end]
         pool.size[start:end] = self.size_mean + \
             self.size_var * np.random.uniform(-1, 1, m)
+        pool.size0[start:end] = pool.size[start:end]
         pool.color[start:end] = self.color
 
 
@@ -178,4 +180,5 @@ class SphereBurstEmitter(Emitter):
         pool.max_life[start:end] = pool.life[start:end]
         pool.size[start:end] = self.size_mean + \
             self.size_var * np.random.uniform(-1, 1, m)
+        pool.size0[start:end] = pool.size[start:end]
         pool.color[start:end] = self.color

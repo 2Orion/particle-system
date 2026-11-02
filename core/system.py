@@ -101,6 +101,9 @@ class ParticleSystem:
             alive = self.pool.life[:n] > 0.0
             for kb in self.kill_boxes:
                 alive &= ~kb.outside(self.pool)
-            stats["died"] = self.pool.compact(alive)
+            # 快路径：全活时跳过 compact 的全字段重排（稳态下几乎不触发，
+            # 一旦有死亡才真正压缩，避免每帧 O(字段数 × count) 的拷贝）
+            if not alive.all():
+                stats["died"] = self.pool.compact(alive)
         stats["alive"] = self.pool.count
         return stats

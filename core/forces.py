@@ -60,31 +60,66 @@ class Wind:
     每粒子相位由位置决定，形成空间上连续、时间上演化的摆动，
     用于雪/火焰。公式：
       w(x,t) = w0 + Σ A_i · sin(ω_i·t + k_i·x + φ_i) · dir_i
+
+    垂直基 (d1, d2) 只依赖 base，构造时算一次并缓存
+    （每物理子步都会调用 apply，recompute 会占掉大部分帧时间）。
     """
     base: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0, 0.0]))
     amplitude: float = 0.5    # 湍流幅度
     frequency: float = 1.0    # 时间频率 ω
     spatial: float = 0.7      # 空间波数 k
     time: float = 0.0         # 由系统推进
+    _basis: tuple | None = field(default=None, init=False, repr=False)
+
+    def _perp_basis(self) -> tuple[np.ndarray, np.ndarray]:
+        """与 base 垂直的两个正交单位向量（首次调用时算，之后复用）。"""
+        if self._basis is None:
+            b = np.asarray(self.base, dtype=float)
+            nb = np.linalg.norm(b)
+            b = b / nb if nb > 1e-12 else np.array([1.0, 0.0, 0.0])
+            d1 = np.array([-b[1], b[0], 0.0])
+            n1 = np.linalg.norm(d1)
+            # base 沿 z 时 (−b1, b0, 0) 退化为零向量，改用 x 轴方向
+            d1 = d1 / n1 if n1 > 1e-12 else np.array([b[2], 0.0, -b[0]])
+            d2 = np.cross(b, d1)
+            d2 /= (np.linalg.norm(d2) + 1e-12)
+            self._basis = (d1, d2)
+        return self._basis
 
     def apply(self, pool: ParticlePool) -> None:
         n = pool.count
+        if n == 0:
+            return
         if self.amplitude == 0.0:
             pool.acc[:n] += self.base
             return
         pos = pool.pos[:n]
         phase = (self.frequency * self.time
                  + self.spatial * (pos[:, 0] + pos[:, 2]))
-        turb = self.amplitude * np.sin(phase)[:, None]
-        # 湍流分量取垂直于 base 的两个方向，避免与定常风同轴抵消
-        b = self.base / (np.linalg.norm(self.base) + 1e-12)
-        d1 = np.array([-b[1], b[0], 0.0])
-        d1 /= (np.linalg.norm(d1) + 1e-12)
-        d2 = np.cross(b, d1)
-        pool.acc[:n] += self.base + turb * d1 + 0.5 * self.amplitude * np.sin(1.7 * phase + 1.3)[:, None] * d2
+        d1, d2 = self._perp_basis()
+        # 两条不同频率/相位的正弦叠加：空间上连续、时间上不规则（伪湍流）
+        s1 = np.sin(phase)[:, None]
+        s2 = np.sin(1.7 * phase + 1.3)[:, None]
+        pool.acc[:n] += self.base + self.amplitude * s1 * d1 + 0.5 * self.amplitude * s2 * d2
 
 
 # ---------------------------------------------------------------- 环境力
+
+@dataclass
+class Buoyancy:
+    """浮力（火焰/烟雾上升）：a_y = g_buoy · life_fraction。
+
+    随剩余生命衰减 —— 上升的火焰粒子"烧尽"后浮力消失，
+    自然形成上宽下窄的火舌（比恒定向上的力更可控）。
+    """
+    acceleration: float = 6.0      # 生命分数为 1 时的提升加速度
+
+    def apply(self, pool: ParticlePool) -> None:
+        n = pool.count
+        if n == 0 or self.acceleration == 0.0:
+            return
+        pool.acc[:n, 1] += self.acceleration * pool.life_fraction
+
 
 @dataclass
 class Attractor:

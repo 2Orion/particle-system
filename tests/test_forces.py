@@ -1,5 +1,6 @@
 """力场测试：方向、大小、公式与课件一致。"""
 import numpy as np
+import pytest
 
 from core.forces import (Attractor, Drag, Gravity, TargetConstraint,
                          Wind, accumulate_all)
@@ -87,6 +88,46 @@ def test_wind_turbulence_varies_in_space():
     w = Wind(base=(1, 0, 0), amplitude=1.0)
     accumulate_all(pool, [w])
     assert not np.allclose(pool.acc[0], pool.acc[1])
+
+
+def test_wind_perp_basis_cached_and_stable():
+    """垂直基只算一次：多次 apply 结果完全一致（缓存不引入漂移）。"""
+    pool = make_pool([(0.0, 0.0, 0.0), (3.0, 1.0, -2.0)])
+    w = Wind(base=(1.0, 0.0, 0.5), amplitude=1.2, frequency=0.0, spatial=0.7)
+    accumulate_all(pool, [w])
+    first = pool.acc[:2].copy()
+    assert w._basis is not None                # 已缓存
+    for _ in range(20):
+        accumulate_all(pool, [w])
+    assert np.allclose(pool.acc[:2], first)
+
+
+def test_wind_perp_basis_orthogonal_to_base():
+    """两个湍流方向都与定常风垂直，不会与之同轴抵消。"""
+    for base in ((1, 0, 0), (0, 0, 1), (1, 1, 1), (0, 1, 0)):
+        w = Wind(base=base, amplitude=1.0)
+        d1, d2 = w._perp_basis()
+        b = np.asarray(base, dtype=float)
+        b = b / np.linalg.norm(b)
+        assert abs(float(np.dot(d1, b))) < 1e-9
+        assert abs(float(np.dot(d2, b))) < 1e-9
+        assert abs(float(np.dot(d1, d2))) < 1e-9
+        assert np.linalg.norm(d1) == pytest.approx(1.0)
+        assert np.linalg.norm(d2) == pytest.approx(1.0)
+
+
+def test_wind_base_along_z_does_not_degenerate():
+    """base 沿 z 时 (−b1, b0, 0) 退化为零向量 → 必须换方向，不能除零出 NaN。"""
+    pool = make_pool([(0.0, 0.0, 0.0)])
+    w = Wind(base=(0.0, 0.0, 1.0), amplitude=1.0)
+    accumulate_all(pool, [w])
+    assert np.isfinite(pool.acc[0]).all()
+    assert np.linalg.norm(pool.acc[0]) > 0
+
+
+def test_wind_empty_pool_safe():
+    pool = ParticlePool(8)
+    accumulate_all(pool, [Wind(base=(1, 0, 0), amplitude=1.0)])
 
 
 def test_accumulate_clears_previous():
