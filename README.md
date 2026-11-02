@@ -4,7 +4,20 @@
 
 # 当前进度
 
-第一轮（引擎核心）已完成：`core/` 六模块（粒子池/积分器/力场/发射器/碰撞/系统调度）+ 58 个 pytest 测试。详见 [CHANGELOG.md](./CHANGELOG.md) 与 [plan.md](./plan.md)。
+- 第一轮（引擎核心）：`core/` 六模块（粒子池/积分器/力场/发射器/碰撞/系统调度）
+- 第二轮（渲染 + 首场景）：`render/` 四模块（相机/纹理/点精灵/网格）、
+  `scenes/fountain.py` 喷泉、`main.py` 入口 —— 85 个 pytest 测试全部通过，
+  真实窗口冒烟 250+ FPS
+
+详见 [CHANGELOG.md](./CHANGELOG.md) 与 [plan.md](./plan.md)。
+
+# 运行
+
+```bash
+python main.py
+```
+
+操作：左键拖拽旋转 / 右键平移 / 滚轮缩放 / Space 暂停 / F 截图 / Esc 退出。
 
 # 运行测试
 

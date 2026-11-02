@@ -1,5 +1,62 @@
 # 更新日志
 
+## 2026-10-31 第二轮：渲染层 + 喷泉场景
+
+对标 `plan.md` W1 后半，交付 `render/` 四模块、`scenes/fountain.py`、`main.py`
+入口 + 27 个新测试（58 → 85），全部通过。
+
+### 新增
+
+- **`render/camera.py`** — 手写 lookAt / 透视投影矩阵（float32，右手 OpenGL 约定）；
+  `OrbitCamera` 轨道相机（yaw/pitch 旋转、滚轮缩放、右键平移），
+  `pixels_per_unit = 0.5·H / tan(fovy/2)` 供点精灵透视缩放。
+- **`render/textures.py`** — 程序化粒子纹理（课件 P26–30）：`gaussian_spot`
+  （高斯光斑，默认）、`soft_disc`（smoothstep 软圆盘，雪花/烟）、`ring`
+  （r=0.7 环，火花）。全 RGBA float32，RGB=白（着色靠粒子色）。
+- **`render/particles.py`** — GPU 点精灵渲染器（GL 3.3，课件 P26/P40）：
+  交错缓冲（pos3+color4+size1，8 float），`gl_PointSize` 透视缩放并 clamp
+  到驱动上限；两种混合模式——additive `glBlendFunc(SRC_ALPHA, ONE)`
+  叠加越叠越亮（点光源模型）、alpha 常规透明（前后遮挡）；
+  颜色预乘自身 alpha 作为加法混合亮度；粒子不写深度按绘制顺序混合。
+- **`render/ground.py`** — 地面网格 + RGB 坐标轴（LINES）。
+- **`scenes/fountain.py`** — 喷泉场景：3 个锥形点源（主直立 + 2 侧倾 ∓0.45rad）、
+  重力 + 线性阻力、地面碰撞（ε=0.30, μ=0.10）、KillBox 剔除；
+  寿命关键帧渐变 白→天蓝→深蓝→暗淡。
+- **`main.py`** — `WindowConfig` 模式入口：轨道相机输入（左键旋转/右键平移/
+  滚轮缩放）、Space 暂停、F 截图（手工 PNG 编码，zlib chunk，免图像库依赖）、
+  标题栏 FPS 统计。
+- **`tests/`** — 新增 4 个测试文件 27 个用例：lookAt 几何性质（eye→原点、
+  目标→−z、保距）、透视 near/far 映射、纹理径向对称/单调性/环峰位置、
+  独立 GL 上下文像素级断言（加法混合叠加更亮、alpha 混合饱和、
+  非法 blend 拒绝）、喷泉动态平衡（粒子数收敛、颜色随寿命变暗）。
+
+### 修复（开发中发现的问题）
+
+- 渲染层相对导入 `from ..core.pool` 超出顶层包 → 全部改绝对导入。
+- `GL_POINT_SIZE_RANGE` 在本机驱动返回 tuple `(1.0, 255.0)` 而非字符串
+  → isinstance 分支处理两种格式。
+- moderngl-window 3.x 回调协议是 `on_render(time, frame_time)` 而非 `render`，
+  事件为 `on_key_event` / `on_mouse_drag_event` 等 → 全部重命名；
+  事件返回值非 None 会触发 NotImplementedError。
+- 早期直接子类化 pyglet Window 与 `run_window_config` 冲突
+  （AttributeError log_level / add_arguments）→ 改为标准 WindowConfig。
+- 窗口冒烟测试中 `window.close()` 后主循环仍继续触发 flip 崩溃
+  → 用 `pyglet.app.exit()` 退出。
+
+### 冒烟测试（真实窗口）
+
+```
+200 帧 @ 250–650 FPS，稳态 730 活粒子，亮像素 7699
+截图 output/frame_506.png：1280×720，亮像素质心 (0.50, 0.57) 居中，
+中部亮度 21.3 高于顶部 14.3 —— 水柱居中、地面网格可见
+```
+
+### 测试
+
+```
+85 passed in 7.01s
+```
+
 ## 2026-10-31 第一轮：引擎核心（最小功能）
 
 对标 `plan.md` W1 前半，交付 `core/` 六模块 + 58 个 pytest 测试，全部通过。
