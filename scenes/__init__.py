@@ -8,6 +8,7 @@ from .fire import FireScene
 from .fireworks import FireworksScene
 from .fountain import FountainScene
 from .snow import SnowScene
+from .text_particles import TextParticlesScene
 
 # 场景注册表：main.py 按数字键 1..N 切换
 SCENES: dict[str, type[Scene]] = {
@@ -15,10 +16,12 @@ SCENES: dict[str, type[Scene]] = {
     "snow": SnowScene,
     "fire": FireScene,
     "fireworks": FireworksScene,
+    "text": TextParticlesScene,
 }
-SCENE_ORDER = ["fountain", "snow", "fire", "fireworks"]
+SCENE_ORDER = ["fountain", "snow", "fire", "fireworks", "text"]
 
 __all__ = [
     "Scene", "SCENES", "SCENE_ORDER",
     "FountainScene", "SnowScene", "FireScene", "FireworksScene",
+    "TextParticlesScene",
 ]

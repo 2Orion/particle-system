@@ -45,19 +45,17 @@ def _run_scene(app: ParticleApp) -> None:
 
     _index += 1
     if _index >= len(SCENE_ORDER):
-        _print_and_exit()
+        _print_and_exit(app)
 
 
-def _print_and_exit() -> None:
-    print("\n===== SCENE SMOKE =====")
+def _print_and_exit(app: ParticleApp) -> None:
+    print("\n===== SCENE SMOKE =====", flush=True)
     for line in _report:
-        print(line)
-    print("=======================")
-    for mod in ("pyglet",):
-        try:
-            __import__(mod).app.exit()
-        except Exception:
-            pass
+        print(line, flush=True)
+    print("=======================", flush=True)
+    # run_window_config 的循环条件是 window.is_closing，
+    # 对 pyglet.app.exit() 无效 —— 必须走 wnd.close()。
+    app.wnd.close()
 
 
 def _make_subclass():
@@ -70,7 +68,7 @@ def _make_subclass():
                     _run_scene(self)
                 except Exception as exc:      # noqa: BLE001
                     _report.append(f"ERROR at {SCENE_ORDER[_index]}: {exc!r}")
-                    _print_and_exit()
+                    _print_and_exit(self)
 
     return SceneSmoke
 

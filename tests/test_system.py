@@ -91,3 +91,90 @@ def test_area_factor_passes_to_emitter():
     assert stats["emitted"] == 200
     stats2 = sys.update(1.0)  # 默认 A=1
     assert stats2["emitted"] == 100
+
+
+# ---------------------------------------------------------------- 积分器切换
+
+def _spring_system(integrator):
+    """一个简谐振子 + 阻力的小系统，用于观察切换积分器后的稳定性。"""
+    sys = ParticleSystem(capacity=2000, integrator=integrator, fixed_step=1 / 120)
+    sys.emitters.append(PointEmitter(rate_mean=0, rate_var=0))   # 不发射
+    start, end = sys.pool.spawn(200)
+    rng = np.random.default_rng(0)
+    sys.pool.pos[start:end] = rng.uniform(-1.0, 1.0, (end - start, 3))
+    sys.pool.vel[start:end] = rng.uniform(-1.0, 1.0, (end - start, 3)) * 0.5
+    sys.pool.life[start:end] = 1e6
+    sys.pool.max_life[start:end] = 1e6
+    sys.forces.append(Gravity())
+    sys.kill_boxes.append(KillBox(lo=(-1e4, -1e4, -1e4), hi=(1e4, 1e4, 1e4)))
+    return sys
+
+
+def test_set_integrator_rejects_unknown():
+    sys = ParticleSystem(capacity=10)
+    with pytest.raises(ValueError, match="unknown integrator"):
+        sys.set_integrator("runge_kutta")
+    # 报错后状态不变
+    assert sys.integrator_name == "velocity_verlet"
+
+
+def test_set_integrator_is_noop_for_same_name():
+    """同名的重复设置不应作废 aux（否则会无谓地重置历史）。"""
+    sys = _spring_system("velocity_verlet")
+    sys.update(1 / 60)
+    before = sys.pool.aux[:sys.pool.count].copy()
+    sys.set_integrator("velocity_verlet")
+    assert np.array_equal(sys.pool.aux[:sys.pool.count], before)
+
+
+@pytest.mark.parametrize("source", list(INTEGRATORS))
+@pytest.mark.parametrize("target", list(INTEGRATORS))
+def test_integrator_switch_keeps_system_stable(source, target):
+    """任意两种积分器互切后，系统不能塌陷 / 出 NaN / 损失粒子。
+
+    回归：verlet 把 ``aux`` 当作「上一步位置 xₙ₋₁」，而 euler 恒把它写成 0、
+    leapfrog 写的是半步速度。切到 verlet 后 ``2x − aux`` 使位置瞬间翻倍，
+    等于注入 ``x/h`` 的伪速度，粒子飞出 KillBox 被 compact() 永久删除。
+    """
+    sys = _spring_system(source)
+    for _ in range(120):               # 先跑 2 秒进入稳态
+        sys.update(1 / 60)
+    count_before = sys.pool.count
+    assert count_before == 200
+
+    sys.set_integrator(target)
+    for _ in range(120):               # 切换后再跑 2 秒
+        sys.update(1 / 60)
+
+    n = sys.pool.count
+    assert n == count_before, f"{source}→{target} 丢了 {count_before - n} 个粒子"
+    assert np.isfinite(sys.pool.pos[:n]).all(), f"{source}→{target} 位置出现 NaN"
+    assert np.isfinite(sys.pool.vel[:n]).all(), f"{source}→{target} 速度出现 NaN"
+
+
+@pytest.mark.parametrize("source", ["euler", "leapfrog", "velocity_verlet"])
+def test_switch_to_verlet_does_not_inject_fake_velocity(source):
+    """切到 verlet 时速度不能突变——突变就说明 aux 被当成了位置历史。
+
+    判据：切换后第一步的速度与切换前同量级（允许 soft 的减速，不允许放大）。
+    """
+    sys = _spring_system(source)
+    for _ in range(120):
+        sys.update(1 / 60)
+    v_before = np.abs(sys.pool.vel[:sys.pool.count]).max()
+
+    sys.set_integrator("verlet")
+    sys.update(1 / 60)
+    v_after = np.abs(sys.pool.vel[:sys.pool.count]).max()
+
+    assert v_after < max(v_before * 10.0, 1.0), \
+        f"{source}→verlet 速度从 {v_before:.3f} 突变到 {v_after:.3f}"
+
+
+def test_set_integrator_invalidates_aux():
+    """切换后 aux 必须是 NaN 哨兵，由新积分器做首步初始化。"""
+    sys = _spring_system("euler")
+    sys.update(1 / 60)
+    assert np.isfinite(sys.pool.aux[:sys.pool.count]).all()   # euler 写 0
+    sys.set_integrator("verlet")
+    assert np.isnan(sys.pool.aux[:sys.pool.count]).all()

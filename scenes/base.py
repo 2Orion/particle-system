@@ -46,6 +46,9 @@ class Scene:
     capacity = 30_000
     blend = "additive"
     texture = "gaussian_spot"
+    # build() 里是否自己填充粒子。持续发射类场景为 False（初始空池），
+    # 文字粒子这类"一次性布好再靠物理演化"的场景为 True。
+    prefill = False
 
     def __init__(self) -> None:
         if self.blend not in VALID_BLEND:

@@ -104,3 +104,46 @@ class OrbitCamera:
     def pixels_per_unit(self, viewport_height: int) -> float:
         """世界单位 → 像素的换算因子（点精灵尺寸用）：0.5·H / tan(fovy/2)。"""
         return 0.5 * viewport_height / np.tan(self.fovy / 2.0)
+
+    # -------------------------------------------------- 屏幕 → 世界
+
+    def screen_ray(self, px: float, py: float,
+                   viewport: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
+        """像素坐标 → 世界空间射线 (origin=eye, direction 单位向量)。
+
+        px/py 为窗口像素坐标，原点左上、y 向下（与 pyglet 一致）。
+        做法：像素 → NDC → 视图空间方向 → 乘 view 的逆旋转回到世界。
+        """
+        w, h = viewport
+        ndc_x = (2.0 * px / max(w, 1)) - 1.0
+        ndc_y = 1.0 - (2.0 * py / max(h, 1))       # y 翻转
+        tan_half = np.tan(self.fovy / 2.0)
+        aspect = w / max(h, 1)
+        # 视图空间：相机看 −z
+        dir_view = np.array([ndc_x * tan_half * aspect, ndc_y * tan_half, -1.0])
+        # view 是刚体变换，其逆旋转 = 转置的左上 3×3
+        v = self.view_matrix()[:3, :3]
+        direction = v.T @ dir_view
+        direction /= np.linalg.norm(direction)
+        return self.eye, direction
+
+    def project_to_plane(self, px: float, py: float, viewport: tuple[int, int],
+                         plane_point=None, plane_normal=None) -> np.ndarray | None:
+        """像素 → 与给定平面（默认过 target、法向朝相机）的交点。"""
+        origin, direction = self.screen_ray(px, py, viewport)
+        if plane_point is None:
+            plane_point = self.target
+        p0 = np.asarray(plane_point, dtype=float)
+        if plane_normal is None:
+            n = self.eye - self.target
+            n /= np.linalg.norm(n)
+        else:
+            n = np.asarray(plane_normal, dtype=float)
+            n /= np.linalg.norm(n)
+        denom = float(direction @ n)
+        if abs(denom) < 1e-9:
+            return None                             # 射线与平面平行
+        t = float((p0 - origin) @ n) / denom
+        if t <= 0.0:
+            return None                             # 交点在相机背后
+        return origin + direction * t

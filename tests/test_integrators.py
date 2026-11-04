@@ -10,7 +10,7 @@ import pytest
 
 from core.forces import accumulate_all
 from core.integrators import (INTEGRATORS, compute_vel, euler, leapfrog,
-                              verlet, velocity_verlet)
+                              repair_verlet_history, verlet, velocity_verlet)
 from core.pool import ParticlePool
 
 
@@ -130,16 +130,89 @@ def test_verlet_velocity_estimate():
 
 
 def test_leapfrog_fresh_particle_first_step():
-    """Leap-Frog 新粒子首步：v_{-h/2}=v_0 初始化，位置走 v_0·h − ¼a·h²（kick 后）。"""
+    """Leap-Frog 新粒子首步应落在解析解 v_0·h + ½a·h² 上（二阶）。
+
+    半步速度按 v_{−h/2} = v_0 − ½a·h 初始化，kick 后 v_{h/2} = v_0 + ½a·h，
+    位置增量 (v_0 + ½a·h)·h —— 与课件 P55 的 leap-frog 首步一致。
+    若按 v_{−h/2} = v_0 初始化，首步会多走 ½a·h²，这个常量偏移之后
+    每步都保留，把二阶精度退化成与显式 Euler 相同的 O(h) 误差。
+    """
     pool = make_pool()
     pool.pos[0] = (0, 0, 0)
     pool.vel[0] = (1.0, 0.0, 0.0)
     h = 0.01
     leapfrog(pool, h, lambda p, _h: accumulate_all(p, [GravityField()]))
-    # v_{h/2} = v_0 + a·h；x(h) = x_0 + v_{h/2}·h = v_0·h + a·h²
     assert abs(pool.pos[0, 0] - h) < 1e-12
-    assert abs(pool.pos[0, 1] + 9.8 * h * h) < 1e-9
+    assert abs(pool.pos[0, 1] - (-0.5 * 9.8 * h * h)) < 1e-12
+
+
+@pytest.mark.parametrize("name", ["verlet", "leapfrog", "velocity_verlet"])
+def test_second_order_methods_have_no_first_step_offset(name):
+    """二阶方法在常加速度下应无首步偏差：2 s 自由落体误差 ≪ h。
+
+    显式 Euler 的同项误差是 ½g·T·h = 0.0817 m（h=1/120），用作对照。
+    """
+    h = 1 / 120.0
+    pool = make_pool()
+    pool.pos[0] = (0, 0, 0)
+    pool.vel[0] = (0, 0, 0)
+    run(INTEGRATORS[name], pool, GravityField(), h, 240)
+    if name == "verlet":
+        compute_vel(pool, h)      # verlet 不维护 vel，位置不受影响
+    y_true = -0.5 * 9.8 * 4.0
+    assert abs(pool.pos[0, 1] - y_true) < 1e-9, \
+        f"{name}: {abs(pool.pos[0, 1] - y_true):.3e}（Euler 同项为 8.17e-2）"
+
+
+def test_verlet_initial_guess_includes_half_acceleration():
+    """新粒子首步：aux 应初始化为 x − v·h + ½a·h²（而非 x − v·h）。"""
+    pool = make_pool()
+    pool.pos[0] = (0.0, 5.0, 0.0)
+    pool.vel[0] = (0.0, 0.0, 0.0)
+    h = 1 / 240.0
+    verlet(pool, h, lambda p, _h: accumulate_all(p, [GravityField()]))
+    # 一步之后 aux 存的是刚才的 x_n（5.0），但首步位置应是 ½g h² 的下落量
+    assert pool.pos[0, 1] == pytest.approx(5.0 - 0.5 * 9.8 * h * h, abs=1e-12)
 
 
 def test_all_integrators_registered():
     assert set(INTEGRATORS) == {"euler", "verlet", "leapfrog", "velocity_verlet"}
+
+
+# ------------------------------------------------------------- 脏 aux 的兜底
+
+@pytest.mark.parametrize("stale_value", [0.0, 1e6, -1e6])
+def test_repair_verlet_history_rebuilds_stale_aux(stale_value):
+    """aux 是别人的状态（如 euler 的 0）时，兜底校验应重建为 x − v·h。
+
+    `ParticleSystem.set_integrator` 在切换时作废 aux，那是主要防线；
+    这里验证兜底本身：把 aux 写成"不可能的位置历史"后能被识别并修正。
+    """
+    pool = make_pool()
+    pool.pos[0] = (4.0, 0.0, 0.0)
+    pool.vel[0] = (0.0, 0.0, 0.0)
+    pool.aux[0] = stale_value                 # 脏数据：既非 x_{n-1}，也不是 NaN
+    h = 1 / 120
+    assert repair_verlet_history(pool, h) == 1
+    assert pool.aux[0, 0] == pytest.approx(4.0)   # 按 x − v·h 重建
+    # 修复后走一步不应跳变（速度为 0、零加速度 → 位置不变）
+    verlet(pool, h, lambda p, _h: accumulate_all(p, [GravityField((0, 0, 0))]))
+    assert abs(pool.pos[0, 0] - 4.0) < 0.05
+
+
+def test_repair_verlet_history_keeps_valid_aux():
+    """合法的历史不能被误判（否则 verlet 会退化成匀速）。"""
+    pool = make_pool()
+    pool.pos[0] = (0.0, 0.0, 0.0)
+    pool.vel[0] = (5.0, 0.0, 0.0)
+    h = 0.01
+    verlet(pool, h, lambda p, _h: accumulate_all(p, [GravityField((0, 0, 0))]))
+    compute_vel(pool, h)                      # 系统每步都会刷新 vel
+    assert repair_verlet_history(pool, h) == 0
+    verlet(pool, h, lambda p, _h: accumulate_all(p, [GravityField((0, 0, 0))]))
+    assert abs(pool.pos[0, 0] - 0.10) < 1e-9  # 匀速：两步各 0.05
+
+
+def test_repair_verlet_history_empty_pool():
+    pool = ParticlePool(10)
+    assert repair_verlet_history(pool, 0.01) == 0

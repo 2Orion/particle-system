@@ -28,14 +28,21 @@ def test_scene_contract(key):
 
 
 @pytest.mark.parametrize("key", SCENE_ORDER)
-def test_scene_reset_clears_pool(key):
-    """reset() 重建系统 → 粒子数归零，且仍可正常运行。"""
-    scene = SCENES[key]()
+def test_scene_reset_restores_initial_state(key):
+    """reset() 重建系统 → 回到刚构造时的状态，且仍可正常运行。
+
+    持续发射类场景初始是空池；prefill 类（文字粒子）初始即已布好粒子。
+    """
+    cls = SCENES[key]
+    initial = cls().count                          # 刚构造时的粒子数
+    scene = cls()
     for _ in range(60):
         scene.update(1 / 60)
     assert scene.count > 0
     scene.reset()
-    assert scene.count == 0
+    assert scene.count == initial
+    if not scene.prefill:
+        assert scene.count == 0
     for _ in range(60):
         scene.update(1 / 60)
     assert scene.count > 0

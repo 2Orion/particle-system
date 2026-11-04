@@ -16,7 +16,7 @@ import numpy as np
 from .collisions import KillBox, PlaneCollider
 from .emitters import Emitter
 from .forces import Wind, accumulate_all
-from .integrators import INTEGRATORS, compute_vel
+from .integrators import INTEGRATORS, compute_vel, repair_verlet_history
 from .pool import ParticlePool
 
 
@@ -32,6 +32,9 @@ class ParticleSystem:
         self.forces: list = []
         self.colliders: list[PlaneCollider] = []
         self.kill_boxes: list[KillBox] = []
+        if integrator not in INTEGRATORS:
+            raise ValueError(f"unknown integrator: {integrator!r}, "
+                             f"expected one of {sorted(INTEGRATORS)}")
         self.integrator_name = integrator
         self.integrator = INTEGRATORS[integrator]
         self.fixed_step = fixed_step
@@ -45,6 +48,28 @@ class ParticleSystem:
         """forces 列表变更后刷新风场引用（update 每帧推进其 time）。"""
         self._wind = [f for f in self.forces if isinstance(f, Wind)]
 
+    def set_integrator(self, name: str) -> None:
+        """切换积分器（唯一的切换入口，务必走这里而不是直接改字段）。
+
+        ``pool.aux`` 是四种积分器共用的一格附加状态，但语义各不相同：
+        verlet 存「上一步位置 xₙ₋₁」、leapfrog 存「半步速度 vₜ₋ₕ/₂」、
+        euler 恒置 0、velocity_verlet 不写。新旧积分器之间这些值不可兼容，
+        直接切过去会拿别人的数据当自己的用 —— 例如 verlet 用
+        ``2xₙ − aux`` 推进，而 aux 还是 0 时位置会瞬间翻倍，等于注入一个
+        ``x/h`` 的伪速度，粒子随即飞出 KillBox 被永久删除。
+
+        所以切换时把 aux 整体置 NaN（与 ``spawn()`` 同一个哨兵约定），
+        让新积分器在下一步对全部粒子做首步初始化。
+        """
+        if name not in INTEGRATORS:
+            raise ValueError(f"unknown integrator: {name!r}, "
+                             f"expected one of {sorted(INTEGRATORS)}")
+        if name == self.integrator_name:
+            return
+        self.pool.aux[:self.pool.count] = np.nan
+        self.integrator_name = name
+        self.integrator = INTEGRATORS[name]
+
     # -------------------------------------------------- 帧循环
 
     def _accumulate(self, pool: ParticlePool, h: float) -> None:
@@ -57,6 +82,10 @@ class ParticleSystem:
 
     def step_physics(self, h: float) -> None:
         """单个固定物理步：力 → 积分 → 碰撞响应。"""
+        if self.integrator_name == "verlet":
+            # 兜底校验 aux：切积分器走 set_integrator 已经作废过，但脚本/
+            # 未来代码仍可能绕过它直接改字段。必须在 compute_vel 之前调用。
+            repair_verlet_history(self.pool, h)
         self.integrator(self.pool, h, self._accumulate)
         if self.integrator_name == "verlet":
             compute_vel(self.pool, h)
